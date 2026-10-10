@@ -26,7 +26,7 @@ python research\pe_function_disasm.py 'C:\path\to\mtkwecx.sys' 0x1401d8540 --aro
 The verifier refuses any image whose SHA-256 differs from
 `6232dbfd53c2e9824eb4d193980f7db378b88dd155cb8d4e64ab56696e057161`.
 It checks function bounds, the descriptor and prepared-frame-control instructions,
-queue call edges, and LEA/MOV pairs
+queue call edges, the MT7925 selector/table-copy arithmetic, and LEA/MOV pairs
 that install the builder in two ops-table slots. Expected TXD2 low-six-bit values
 are `0x0d` for an action-frame header and `0x20` for a basic data-frame header.
 These are field-projection examples, not complete transmit descriptors.

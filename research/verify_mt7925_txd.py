@@ -99,6 +99,38 @@ def verify(path: Path) -> dict:
         "prepared-FC to descriptor-input mapping differs",
     )
 
+    selector = list(md.disasm(pe.get_data(0x1FF771, 0x1D), 0x1401FF771))
+    require(
+        [(i.mnemonic, i.op_str) for i in selector] == [
+            ("mov", "edx, 0x7925"), ("cmp", "ax, dx"),
+            ("je", "0x1401ff785"), ("mov", "edx, 0x717"),
+            ("cmp", "ax, dx"), ("jne", "0x1401ff793"),
+            ("add", "rsp, 0x28"), ("jmp", "0x1401f0e78"),
+        ],
+        "MT7925 chip selector differs",
+    )
+    initializer_call = next(md.disasm(pe.get_data(0x1F0EC1, 5), 0x1401F0EC1))
+    require(
+        initializer_call.mnemonic == "call"
+        and initializer_call.operands[0].imm == 0x1401F0FB8,
+        "MT7925 ops-table initialization call differs",
+    )
+    copy = list(md.disasm(pe.get_data(0x1F0EDF, 0x19), 0x1401F0EDF))
+    require(len(copy) == 4, "expected four ops-table copy setup instructions")
+    require(
+        (copy[0].mnemonic, copy[0].op_str) == ("lea", "rcx, [rbx + 0x1464d7f]")
+        and (copy[1].mnemonic, copy[1].op_str) == ("mov", "r8d, 0x2f8")
+        and copy[2].mnemonic == "lea" and copy[2].operands[1].type == X86_OP_MEM
+        and copy[2].operands[1].mem.base == X86_REG_RIP
+        and copy[3].mnemonic == "call" and copy[3].operands[0].imm == 0x140010118,
+        "MT7925 ops-table copy setup differs",
+    )
+    table_base = copy[2].address + copy[2].size + copy[2].operands[1].mem.disp
+    require(table_base == 0x14025D2C0, "MT7925 ops-table source differs")
+    member_offset = INITIALIZERS[1][1] - table_base
+    require(member_offset == 0x198, "builder member offset differs")
+    require(0x1464D7F + member_offset == 0x1464F17, "adapter callback offset differs")
+
     # This verifies only the recovered TXD2 field projection, not a complete
     # usable TXWI: WCID, buffer, ownership, sequence and crypto remain unknown.
     mask = 0x3F
@@ -128,7 +160,16 @@ def verify(path: Path) -> dict:
             "argument": "R8 = RBP - 0x69",
             "type_offset": "0x2b",
             "subtype_offset": "0x2d",
-            "unresolved": "dynamic MT7925 callback selection and original raw-input contract",
+            "unresolved": "original raw-input contract and associated RX policy",
+        },
+        "mt7925_callback_assignment": {
+            "selector_va": "0x1401ff771",
+            "chip_init_va": "0x1401f0e78",
+            "copy_call_va": "0x1401f0ef3",
+            "table_base_va": hex(table_base),
+            "copy_size": "0x2f8",
+            "builder_member_offset": hex(member_offset),
+            "adapter_callback_offset": "0x1464f17",
         },
         "field_projection_vectors": vectors,
         "scope": "static file validation only; no driver load, device open, or RF proof",

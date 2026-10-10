@@ -44,6 +44,7 @@ changed for this analysis.
 | Linux uses a native-802.11 TXWI and supports injected frames | Pinned upstream Linux `mt76` source | High |
 | Windows WDI has an internal LE-to-regular-datapath injection route | Microsoft DDI documentation and WDI sample | High |
 | Installed MediaTek code builds Connac3 `txwi[2]` type/subtype fields with the same masks as `mt76` | Hash-pinned static disassembly | High |
+| Installed WiFiCx ordinary TX reaches that builder on the MT7925 initialization branch | Queue calls, prepared-header projection, chip selector, and ops-table copy | High, static |
 | The installed client's send path reaches that builder for arbitrary injected management frames | Indirect tables and partial path recovery only | Unknown; first static gate |
 | A generic LWF can inject on this Windows 11/MT7925 stack | Historical Packet11 precedent only | Unknown |
 | Associated RX exposes off-BSS AWDL management/data MPDUs on Windows | No proof yet | Unknown; first RX gate |
@@ -292,19 +293,22 @@ The builder has two recovered code references: LEA instructions at
 ops-table slots `0x14025cff8` and `0x14025d458`. The latter are data addresses,
 not call sites. Separately,
 `WdiSendDataProcess` occupies `0x1400504c4-0x140050cde` and explicitly includes
-chip ID `0x7925` in its gates. Still unknown are:
+chip ID `0x7925` in its gates, but it is separate from the recovered WiFiCx queue
+path. Still unknown are:
 
-- which WDI or vendor metadata fields populate `[rdi+0x2b]` and `[rdi+0x2d]`;
-- the indirect call chain from `WdiSendDataProcess` through the chip ops table;
-- where the raw 802.11 buffer pointer and length enter that chain;
+- where acceptable caller-supplied 802.11 bytes and length enter the live client;
+- which policy permits an associated station to submit category-127 frames;
 - how port, peer/WCID, own-MAC, sequence, encryption exemption, rate, and channel
   policy are selected for a management action frame.
 
 The subsequent [WiFiCx queue map](mt7925-wificx-queue-map.md) resolves the current
 queue-to-hard-transmit-to-dynamic-TXD-dispatch path. It also traces the separate
-descriptor-input fields from the prepared frame-control word. The dynamic chip
-callback selection, original raw-input contract, and associated RX policy remain
-unresolved. Internal injection is still a research hypothesis, not a working entry.
+descriptor-input fields from the prepared frame-control word. The `0x7925` chip
+branch copies the initialized ops table from `0x14025d2c0` into adapter
+`+0x1464d7f`; member `+0x198` installs `AsicConnac3xXmitWriteTxD` at the dispatch
+field `+0x1464f17`. Thus that static call chain is closed. Original raw-input
+acceptance and associated RX policy remain unresolved; external injection is
+still a research hypothesis, not a working entry.
 
 `verify_mt7925_txd.py` checks the exact image SHA-256, runtime-function bounds,
 instruction bytes, and both initializer-to-slot mappings. Its action/data vectors
@@ -404,7 +408,7 @@ a vendor-specific action category distinct from Public Action category 4.
 | Required function | Linux proof | Windows evidence | Remaining gate |
 |---|---|---|---|
 | Full 802.11 action/data bytes | OWL builds radiotap + full 802.11; mac80211 delivers native bytes to `mt76` | Legacy WDI and Packet11 establish older native-NBL contracts | Locate raw buffer/length in the installed WiFiCx client |
-| Frame type/subtype in TXD | `mt7925_mac_write_txwi_80211` derives both from frame control | `AsicConnac3xXmitWriteTxD` writes identical `txwi[2]` masks | Trace `[rdi+0x2b/+0x2d]` back to WDI/frame header |
+| Frame type/subtype in TXD | `mt7925_mac_write_txwi_80211` derives both from frame control | WiFiCx hard-TX derives descriptor input from prepared frame control; MT7925 selects Connac3 builder with identical masks | Trace acceptable original input and header rewriting/policy |
 | Port/peer identity | mac80211 VIF/STA WCID with global-WCID fallback | Legacy WDI injection requires PortId/PeerId/ExTid; WiFiCx has port/peer queue demultiplexing | Select a valid associated context for category-127 vendor action |
 | Own MAC | omdrop uses station MAC; hardware transmits it | MediaTek TXD has own-MAC/WTBL policy; Packet11 also constrained SA to adapter MAC | Prove current station MAC is accepted without rewrite |
 | Same-channel scheduling | AP is already on 6/44/149; no channel switch | Existing associated Windows channel is known to miniport | First proof must use current AP channel 6/44/149 |
@@ -415,10 +419,10 @@ a vendor-specific action category distinct from Public Action category 4.
 
 ### Go now: read-only and offline work
 
-1. **R0-TX call graph:** tie the callback loaded from `adapter+0x1464f17` by
-   `0x1401a2b2c` to ops-table slots `0x14025cff8` or `0x14025d458` for MT7925.
-   The [queue map](mt7925-wificx-queue-map.md) recovers the preceding direct edges;
-   `WdiSendDataProcess` is a separate path, not an assumed intermediate step.
+1. **R0-TX call graph, recovered:** the [queue map](mt7925-wificx-queue-map.md)
+   closes queue-to-dispatch and the MT7925 initializer-to-Connac3 callback edge.
+   Keep these assertions in the hash-locked checker while tracing original
+   raw-input acceptance. `WdiSendDataProcess` is a separate path.
 2. **R0-TX inputs:** identify the object at `rdi`, name offsets `+0x2b/+0x2d`, and
    trace buffer pointer/length, port, WCID, own-MAC, rate, exemption, ACK, and
    sequence inputs.
@@ -491,8 +495,9 @@ The outcome matrix localizes failure:
 - The stock Windows driver's external Native 802.11 LWF acceptance is unknown.
 - The installed client's valid port/peer context for a broadcast category-127
   action frame is unknown; legacy WDI PortId/PeerId/ExTid fields are only clues.
-- The mapping from WDI/frame metadata into the vendor fields at `+0x2b/+0x2d`
-  is unknown.
+- The final descriptor-input fields at `+0x2b/+0x2d` come from prepared frame
+  control; what externally supplied frame shapes can reach that stage remains
+  unknown.
 - Firmware handling of a management TXD from the associated station port is
   unknown on Windows even though Linux proves the hardware/firmware family can do
   it through `mt76`.

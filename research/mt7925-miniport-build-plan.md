@@ -21,8 +21,8 @@ Static inventory of the preserved `mtkwecx.sys` image exposes the following inte
 - receive path: `AsicConnac3xPciProcessRxPacket`, `AsicConnac3xPciProcessRxSnifferPacket`, and `N6PlatformIndicateRecvPktToNdis`;
 - completion/indication boundary: `N6PlatformIndicateXmitPktToNdis` and `N6PlatformIndicateRecvPktToNdis`.
 
-The [queue map](mt7925-wificx-queue-map.md) recovers the following path, with the
-remaining dynamic callback selection marked explicitly. Static class-extension
+The [queue map](mt7925-wificx-queue-map.md) recovers the following path, including
+the MT7925-specific callback-table assignment. Static class-extension
 strings and `WdfVersionBindClass` show that this package is a WiFiCx/NetAdapterCx
 client, not a legacy WDI miniport. It nevertheless retains `WdiSendDataProcess`,
 extensive `NdisWdi*`/WDI task vocabulary, and a native 802.11 internal path:
@@ -33,7 +33,7 @@ WiFiCx/NetAdapterCx packet and fragment queues
   -> MTCxHifPci*XmitHardTransmit
   -> descriptor-input context populated from prepared 802.11 frame control
   -> dynamic TXD dispatch through adapter+0x1464f17
-  -- unresolved chip-callback assignment --> Connac3 TXD/TXWI builder
+  -> MT7925-initialized callback -> Connac3 TXD/TXWI builder
   -> PCIe DMA ring + doorbell
   -> firmware/radio
 
@@ -59,8 +59,10 @@ Both WiFiCx hard-transmit helpers populate these descriptor-input offsets from
 the prepared frame-control word: type `(FC >> 2) & 3`, subtype `(FC >> 4) & 15`.
 That input is a separate stack object from the queue's TX bookkeeping object;
 identical numeric offsets in those two structures must not be conflated. Remaining
-tasks are to prove the chip callback selection, locate acceptable original frame
-input, and recover WCID/encryption/sequence handling.
+tasks are to locate acceptable original frame input and recover
+WCID/encryption/sequence handling. The chip selector's `0x7925` branch copies the
+ops table at `0x14025d2c0` to adapter `+0x1464d7f`; builder member `+0x198` becomes
+the exact dispatch field at `+0x1464f17`. The offline verifier checks that chain.
 
 No caller-frame TX handler was identified in the 96 recovered vendor-OID records
 or shipped IHV DLL call sites for this image. Its diagnostic sniffer requires
@@ -151,7 +153,7 @@ The raw path must be inside the sole ring owner. It must never let user mode pro
 
 - Recover the exact WiFiCx/NetAdapterCx capability, TX/RX queue, and action-frame callback registrations in `mtkwecx.sys`; use older WDI handler layouts only as comparison evidence.
 - Name the installed equivalents of target-descriptor init, data send, injected-frame scheduling, native MPDU retrieval, RX indication, and buffer return.
-- Continue from the recovered WiFiCx hard-transmit helpers: trace the prepared header back to accepted input, and resolve the dynamic callback at `adapter+0x1464f17` to the MT7925 builder. Do not assume a `WdiSendDataProcess` edge.
+- Continue from the recovered WiFiCx hard-transmit helpers and MT7925 callback assignment: trace the prepared header back to acceptable original input. Do not assume a `WdiSendDataProcess` edge.
 - Map WCID selection, injected/IHV TID handling, encryption exemption, sequence ownership, completion, and every failure cleanup.
 - Match the Windows sniffer/monitor firmware payload with Linux `UNI_SNIFFER_ENABLE`/`UNI_SNIFFER_CONFIG`; locate the active-port RX filter and native-MPDU queue.
 - Build golden offline vectors for one category-127 AWDL action MPDU and one unencrypted AWDL IPv6 data MPDU. No hardware I/O.

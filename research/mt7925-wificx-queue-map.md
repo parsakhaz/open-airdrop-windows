@@ -13,13 +13,17 @@ SHA-256 6232DBFD53C2E9824EB4D193980F7DB378B88DD155CB8D4E64AB56696E057161
 base    0x140000000
 ```
 
-The important conclusion is narrower than “the paths never meet.” The decoded
-WiFiCx callbacks implement a NetAdapterCx ring path which constructs MediaTek TX
-objects and submits them through `MTCxHifPci*XmitHardTransmit`. Both hard-TX
-helpers reach a dynamic TXD-dispatch wrapper, but the selected MT7925 function
-pointer has not yet been statically tied to `AsicConnac3xXmitWriteTxD`. There is
-**no direct or statically resolved call edge** from the queue callbacks to
-`WdiSendDataProcess`, and no direct call to the Connac3 builder.
+The important conclusion is that the stock WiFiCx TX queue-to-Connac3 TXD-builder
+edge is now statically closed for chip ID `0x7925`. The decoded WiFiCx callbacks
+implement a NetAdapterCx ring path which constructs MediaTek TX objects and
+submits them through `MTCxHifPci*XmitHardTransmit`. Both hard-TX helpers reach a
+dynamic TXD-dispatch wrapper. The MT7925 initializer copies an ops template whose
+slot `+0x198` contains `AsicConnac3xXmitWriteTxD` into the per-adapter table; that
+slot lands exactly at `adapter+0x1464f17`, which the wrapper loads and dispatches.
+
+This does **not** prove that an external LWF or ordinary NetAdapterCx packet ring
+can supply an arbitrary native 802.11 MPDU. There is no direct or statically
+resolved call edge from the queue callbacks to `WdiSendDataProcess`.
 `WdiSendDataProcess` is reached by a different family of workers. Both paths use
 the generic scheduler at `0x14008d62c`, but on different embedded work objects;
 that shared primitive is not evidence that their packet pipelines converge.
@@ -49,6 +53,10 @@ RIP-relative log-string references unless noted otherwise.
 | TX work scheduler | `0x14008d62c` | 30 decoded direct callers; generic work-object primitive |
 | AP/special hard TX | `0x1400885d0-0x140089047` | embedded name `MTCxHifPciApXmitHardTransmit` |
 | normal hard TX | `0x140089048-0x14008a16f` | embedded name `MTCxHifPciXmitHardTransmit` |
+| TXD-dispatch wrapper | `0x1401a2b2c-0x1401a2b44` | per-adapter function pointer with v1 fallback |
+| chip-family selector | `0x1401ff748-0x1401ff798` | reads chip ID at adapter `+0x1f72`; `0x7925` selects MT7925 init |
+| MT7925 initializer | `0x1401f0e78-0x1401f0fb7` | initializes templates and copies the TXD ops table into the adapter |
+| MT7925 TXD-table initializer | `0x1401f0fb8-0x1401f1512` | builds the `0x2f8`-byte template at `0x14025d2c0` |
 | `EvtAdapterCreateRxQueue` | `0x14008bd50-0x14008c211` | named string xref at `0x14008bd87` |
 | `EvtRxQueueAdvance` | `0x14008c220-0x14008c4d1` | named string xrefs at `0x14008c2b3`, `0x14008c41f`, `0x14008c4a1` |
 | `EvtRxQueueCancel` | `0x14008c4e0-0x14008c5e2` | named string xrefs |
@@ -163,9 +171,62 @@ The wrapper is the 24-byte leaf at `0x1401a2b2c-0x1401a2b44`:
 0x1401a2b3f  null: tail-jump to XmitWriteTxDv1 at 0x1401a2b44
 ```
 
-This closes the queue-to-TXD-*dispatch* edge. It does not yet close the final
-dynamic edge to `AsicConnac3xXmitWriteTxD`: the assignment of
-`adapter+0x1464f17` for the MT7925 branch remains to be proved.
+### MT7925 selection closes the final builder edge
+
+The chip-family selector at `0x1401ff748-0x1401ff798` receives the adapter in
+`RCX` and reads its 16-bit chip ID:
+
+```text
+0x1401ff74c  load word [adapter+0x1f72]
+0x1401ff771  prepare constant 0x7925
+0x1401ff776  compare chip ID with 0x7925
+0x1401ff779  equal -> 0x1401ff785
+0x1401ff789  tail-jump to MT7925 initializer 0x1401f0e78
+```
+
+The initializer preserves the adapter in `RBX` at `0x1401f0e82`, calls the
+MT7925 TXD-table initializer at `0x1401f0ec1`, then copies the resulting table:
+
+```text
+0x1401f0edf  RCX = adapter+0x1464d7f       # destination
+0x1401f0ee6  R8D = 0x2f8                   # byte count
+0x1401f0eec  RDX = 0x14025d2c0             # template source
+0x1401f0ef3  call copy helper 0x140010118
+```
+
+The helper rejects a null source/destination or a zero count, then forwards the
+same `(destination, source, count)` arguments to `0x14020ce40`. That target is an
+overlap-safe memory-copy routine: it returns the destination and selects forward
+or backward copying according to source/destination overlap. For these disjoint
+template and adapter regions, its effect is a `0x2f8`-byte memcpy.
+
+The called table initializer first clears `0x2f8` bytes at `0x14025d2c0`, then
+populates its callback slots. In particular:
+
+```text
+0x1401f12b3  LEA RAX, AsicConnac3xXmitWriteTxD (0x1401d8540)
+0x1401f12ba  MOV [0x14025d458], RAX
+```
+
+The slot arithmetic closes the indirect edge:
+
+```text
+0x14025d458 - 0x14025d2c0 = 0x198
+0x1464d7f + 0x198          = 0x1464f17
+```
+
+Therefore the MT7925 table copy places `AsicConnac3xXmitWriteTxD` at the exact
+per-adapter offset loaded by the common wrapper. With the normal and special
+hard-TX calls above, the recovered static chain is:
+
+```text
+WiFiCx queue -> processTxAdvance -> MTCxHifPci*XmitHardTransmit
+             -> 0x1401a2b2c -> AsicConnac3xXmitWriteTxD
+```
+
+This resolves callback selection for the installed MT7925 branch. It does not
+resolve what external producer, if any, can feed arbitrary raw MPDUs into that
+otherwise proven internal path.
 
 ## TX object versus descriptor-input context
 
@@ -214,9 +275,9 @@ normal path
 ```
 
 `AsicConnac3xXmitWriteTxD` also uses the third argument: it copies `R8` into `RDI`
-at `0x1401d8570`. Its input layout matches this stack context, supporting the
-candidate dynamic edge; selection of that callback is still unproven. Its offsets
-must not be interpreted as offsets in the pooled queue TX object.
+at `0x1401d8570`. Its input layout matches this stack context, and the MT7925
+template-copy chain above proves selection of that callback. Its offsets must not
+be interpreted as offsets in the pooled queue TX object.
 
 At the Connac3 builder:
 
@@ -231,7 +292,8 @@ At the Connac3 builder:
 The builder address is installed through two ops-table initializers. The actual
 code references are `LEA` instructions at `0x1401e38b1` and `0x1401f12b3`; the
 following `MOV`s at `0x1401e38b8` and `0x1401f12ba` store it into BSS slots
-`0x14025cff8` and `0x14025d458`, respectively. The BSS addresses are slots, not
+`0x14025cff8` and `0x14025d458`, respectively. The latter is the `+0x198` slot in
+the MT7925 template copied into the adapter. The BSS addresses are slots, not
 initializer instruction addresses.
 
 ## RX queue flow
@@ -280,20 +342,18 @@ the WDI processor.
 | WiFiCx queue copies queue `+0x29` into a distinct TX-object byte `+0x2b` | High; field meaning provisional |
 | WiFiCx and legacy WDI paths are separate before scheduling | High |
 | Both hard-TX helpers reach common dynamic TXD dispatch at `0x1401a2b2c` | High |
-| Dynamic dispatch selects `AsicConnac3xXmitWriteTxD` on MT7925 | Plausible, not statically closed |
+| MT7925 selector initializes and copies the `0x2f8`-byte ops template | High |
+| Dynamic dispatch selects `AsicConnac3xXmitWriteTxD` on MT7925 | High; statically closed by slot arithmetic |
 
 The next read-only gates are deliberately bounded:
 
-1. Find every writer of `adapter+0x1464f17`, recover the MT7925 selection branch,
-   and tie its value to one of the two BSS slots containing
-   `AsicConnac3xXmitWriteTxD`.
-2. Name the guarded framework accessor at `0x140087d6e` and decode the translation
+1. Name the guarded framework accessor at `0x140087d6e` and decode the translation
    table used for queue context `+0x29`; do not assume it is a frame-type enum.
-3. Trace the raw-buffer pointer and length from the AP/special path into the TX
+2. Trace the raw-buffer pointer and length from the AP/special path into the TX
    object and prepared frame at `[rsi]`, without assuming the ordinary NetAdapterCx
    packet ring accepts an 802.11 MPDU. Reconcile all consumers before naming TX
    object bytes `+0x2a/+0x2b/+0x2d`.
-4. Map the hardware RX producer into the three lists consumed by
+3. Map the hardware RX producer into the three lists consumed by
    `EvtRxQueueAdvance`, and determine where non-associated/vendor-action frames
    are admitted or discarded.
 
