@@ -22,3 +22,7 @@ gate before any live driver change.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-Tests.ps1
 ```
+
+The suite takes roughly 75 seconds: it exercises two real 30-second watchdog
+deadlines using temporary-file operations and fake recovery, without touching
+the adapter. See the [validation record](evidence/offline-validation-20261010.md).

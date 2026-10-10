@@ -48,17 +48,14 @@ Write-JsonFile -Value $config -Path (Join-Path $runDirectory 'watchdog.json')
 $taskName = "OpenAirdrop-WifiSafety-$runId"
 $argument = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RunDirectory "{1}"' -f $watchdogPath, $runDirectory
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$mutex = New-Object Threading.Mutex($false, 'Global\OpenAirdrop-WifiSafety-Guard')
-if (-not $mutex.WaitOne(0)) {
-    $mutex.Dispose()
-    throw 'Another guarded Wi-Fi operation is already running.'
-}
+$receivedFinalReport = $false
 
 try {
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    # Start exactly once on demand. A future trigger could repeat a destructive
+    # operation after this caller dies. The independent watchdog owns the mutex.
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
     $reportPath = Join-Path $runDirectory 'report.json'
     $waitDeadline = (Get-Date).AddMinutes(3)
@@ -69,11 +66,19 @@ try {
         throw "The independent watchdog did not produce a report. Leave the scheduled task in place and inspect: $runDirectory"
     }
     $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+    $receivedFinalReport = $true
     $report | ConvertTo-Json -Depth 12
     if (-not $report.ConnectivityRestored) { exit 1 }
+    if ($report.Outcome -ne 'healthy_no_restore_needed') {
+        Write-Warning 'Connectivity recovered, but the experiment required rollback. Do not treat the requested change as successful.'
+        exit 2
+    }
 }
 finally {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    $mutex.ReleaseMutex()
-    $mutex.Dispose()
+    if ($receivedFinalReport) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Warning "No final watchdog report was received. The on-demand task is retained for inspection: $taskName; $runDirectory"
+    }
 }
