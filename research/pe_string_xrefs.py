@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
+from collections import deque
 import re
 from pathlib import Path
 
@@ -23,6 +25,8 @@ def main() -> None:
         help="Match within printable strings and resolve references to their starts",
     )
     args = parser.parse_args()
+    if args.context < 0:
+        parser.error("--context must be nonnegative")
 
     data = args.pe.read_bytes()
     pe = pefile.PE(data=data, fast_load=False)
@@ -50,38 +54,76 @@ def main() -> None:
         raise SystemExit("String not found")
 
     target_vas = {}
-    for offset in offsets:
+    for offset in sorted(offsets):
         rva = pe.get_rva_from_offset(offset)
         target_vas[base + rva] = offset
     print("targets:", ", ".join(f"VA={va:#x}/file={offset:#x}" for va, offset in target_vas.items()))
 
     md = Cs(CS_ARCH_X86, CS_MODE_64)
-    md.detail = True
-    instructions = []
-    for section in pe.sections:
-        if section.Characteristics & 0x20000000:
-            instructions.extend(md.disasm(section.get_data(), base + section.VirtualAddress))
-    by_address = {instruction.address: index for index, instruction in enumerate(instructions)}
-    runtime_ranges = [
+    md.skipdata = True
+    detail_md = Cs(CS_ARCH_X86, CS_MODE_64)
+    detail_md.detail = True
+    runtime_ranges = sorted(
         (base + entry.struct.BeginAddress, base + entry.struct.EndAddress)
         for entry in getattr(pe, "DIRECTORY_ENTRY_EXCEPTION", [])
-    ]
+    )
+    runtime_starts = [begin for begin, _ in runtime_ranges]
 
-    for instruction in instructions:
-        references = []
-        for operand in instruction.operands:
-            if operand.type == X86_OP_MEM and operand.mem.base == X86_REG_RIP:
-                referenced = instruction.address + instruction.size + operand.mem.disp
-                if referenced in target_vas:
-                    references.append(referenced)
-        if not references:
+    def containing_function(address: int) -> tuple[int, int] | None:
+        index = bisect_right(runtime_starts, address) - 1
+        if index >= 0 and address < runtime_ranges[index][1]:
+            return runtime_ranges[index]
+        return None
+
+    # Keep only the requested context around hits.  Materializing every decoded
+    # instruction in a multi-megabyte driver can consume several gigabytes with
+    # Capstone's Python objects and get the analysis process killed.
+    records: list[dict[str, object]] = []
+    for section in pe.sections:
+        if not section.Characteristics & 0x20000000:
             continue
-        containing = next(((begin, end) for begin, end in runtime_ranges if begin <= instruction.address < end), None)
-        print(f"\n=== xref at {instruction.address:#x}; function={containing} ===")
-        center = by_address[instruction.address]
-        for current in instructions[max(0, center - args.context) : center + args.context + 1]:
-            marker = ">>" if current.address == instruction.address else "  "
-            print(f"{marker} {current.address:#018x} {current.mnemonic:8} {current.op_str}")
+        before: deque = deque(maxlen=args.context)
+        active: list[dict[str, object]] = []
+        section_data = section.get_data()
+        section_va = base + section.VirtualAddress
+        for address, size, mnemonic, op_str in md.disasm_lite(section_data, section_va):
+            current = (address, mnemonic, op_str)
+            for record in active[:]:
+                record["instructions"].append(current)  # type: ignore[union-attr]
+                record["remaining"] = int(record["remaining"]) - 1
+                if record["remaining"] == 0:
+                    active.remove(record)
+
+            references = []
+            if "rip" in op_str:
+                offset = address - section_va
+                detailed = next(detail_md.disasm(section_data[offset : offset + size], address), None)
+                if detailed:
+                    for operand in detailed.operands:
+                        if operand.type == X86_OP_MEM and operand.mem.base == X86_REG_RIP:
+                            referenced = detailed.address + detailed.size + operand.mem.disp
+                            if referenced in target_vas:
+                                references.append(referenced)
+            if references:
+                record = {
+                    "address": address,
+                    "function": containing_function(address),
+                    "instructions": [*before, current],
+                    "remaining": args.context,
+                }
+                records.append(record)
+                if args.context:
+                    active.append(record)
+            before.append(current)
+
+    for record in records:
+        print(
+            f"\n=== xref at {int(record['address']):#x}; "
+            f"function={record['function']} ==="
+        )
+        for address, mnemonic, op_str in record["instructions"]:
+            marker = ">>" if address == record["address"] else "  "
+            print(f"{marker} {address:#018x} {mnemonic:8} {op_str}")
 
 
 if __name__ == "__main__":

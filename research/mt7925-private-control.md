@@ -3,10 +3,10 @@
 Date: 2026-10-10  
 Target: MediaTek Wi-Fi 7 MT7925 160MHz PCIe Adapter, installed package `oem59.inf`
 
-This note records static reverse engineering only. It does not claim that enabling
-the private controls is association-safe, and none of the OIDs below have been sent
-to the live adapter. Any live control experiment must run inside the repository's
-tested 30-second connectivity auto-restore watchdog.
+This note records static reverse engineering and the earlier guarded, read-only
+status query documented below. No sniffer-enable or other state-changing OID was
+sent. The current user instruction requires fresh approval before any live
+driver/adapter action, in addition to the tested 30-second watchdog.
 
 ## Exact binaries
 
@@ -61,7 +61,8 @@ D:P(A;;GA;;;SY)(A;;GRGWGX;;;BA)(A;;GRGW;;;WD)(A;;GR;;;RC)
 
 Thus LocalSystem gets generic-all, administrators read/write/execute, Everyone
 (`WD`) read/write, and restricted code read. This is static evidence that an
-ordinary local process can open the tunnel; an actual open has not been attempted.
+ordinary local process can open the tunnel. The later guarded open/query succeeded
+in its test context; it did not establish access from every restricted token.
 
 The KMDF `MTCxEvtIoDeviceControl` callback is at `0x14007f2b0`. It accepts only
 `0x170002`, retrieves a minimum four-byte OID input plus the caller's output buffer,
@@ -105,9 +106,9 @@ values 2 or 3. The first word at `+4` selects internal ICS flags (cases 0 throug
 3), while byte 1 is the enable value. It builds a local `0x54`-byte command and
 calls `0x1400d1570`, the likely firmware-facing ICS command routine.
 
-This proves a reachable private capture-control ABI. It does **not** yet prove where
-captured frames are delivered, whether monitor RX coexists with an associated
-station, or whether ICS data is exposed anywhere except the driver's PCAP/log path.
+Static dispatch identifies these private capture controls. The guarded query
+confirms status-query reachability only; enable/configure was not tested. The
+controls alone do not establish packet delivery or associated monitor RX.
 
 Further disassembly resolves two important constraints:
 
@@ -125,11 +126,12 @@ Private OIDs `0xfffcf209` and `0xfffcf208` map to `FuncSetTestMode` and
 `FuncGetTestMode`. They toggle/query a driver test flag; they do not accept a frame
 buffer. Test mode is therefore not an association-preserving raw-TX API.
 
-## Exhaustive vendor-OID audit
+## Recovered vendor-OID dispatch-table audit
 
 `pe_oid_inventory.py` recovers 96 valid 12-byte dispatch records and associates
-each handler with RIP-relative log-name strings. The complete table was audited,
-including all 19 handlers without a recovered `Func*` name.
+each handler with RIP-relative log-name strings. All 96 recovered records were
+inspected, including 19 handlers without a recovered `Func*` name. This does not
+exclude alternate tables, dynamic registrations, or other internal paths.
 
 The only TX/capture/test-labelled entries are:
 
@@ -159,13 +161,29 @@ Potentially broad-looking entries were also ruled out:
 
 The WDI strings `WDI_TASK_IHV`, `WDI_IHV_REQUEST`, and `WDI_TLV_IHV_DATA` occur in
 generic numeric-ID-to-name diagnostic functions shared by the driver framework.
-No corresponding packet-oriented IHV handler is registered, and `mtkihvx.dll`
-does not import or invoke a WLAN IHV-control API. Its Wi-Fi operations reduce to
-the four observed `MTKWLAN` OID queries.
+They do not identify a private arbitrary-frame OID.
 
-Together, the exhaustive dispatch audit closes the remaining stock-driver
-userspace escape hatch: there is no private OID that accepts an arbitrary 802.11
-TX buffer, and the only 802.11 RX sniffer enforces idle ports.
+The separate legacy Native-802.11 IHV extension path is real and is registered
+for this adapter at `Ndi\IHVExtensions\ExtensibilityDLL`. `mtkihvx.dll` exports
+`Dot11ExtIhvInitService`, copies the OS-supplied 0xb0-byte `DOT11EXT_APIS` table
+into its global at `0x180086098`, and registers a full IHV callback table. Those
+APIs arrive as function pointers rather than PE imports, so the earlier
+import-based conclusion was incomplete.
+
+Static xref analysis found no calls through this DLL's table slots for
+`Dot11ExtSendPacket` at `+0x48` or `Dot11ExtNicSpecificExtension` at `+0x88`.
+Its registered `Dot11ExtIhvControl` callback at `0x1800038a0` is a no-op that
+returns success without consuming a payload. Its receive callback handles only
+EtherTypes registered for the IHV security/authentication flow, not monitor
+traffic. Thus Windows supplies a dormant post-association send callback, but the
+shipped MediaTek DLL neither exposes nor uses it. The documented callback is
+also a unicast EtherType/data path, not proof of arbitrary AWDL action-frame TX.
+
+No arbitrary-frame TX handler was identified in this recovered table or shipped
+IHV call sites for the hash above. The IHV control callback is inert, no OS send
+callback use was found, and the recovered packet-sniffer control enforces idle
+ports. An internal WiFiCx native-frame entry remains a hypothesis to investigate,
+not an established `MTKWLAN` or `WlanIhvControl` ABI. See the build plan.
 
 ## Guarded live validation
 
@@ -175,23 +193,22 @@ opcode-2 sniffer status query under the tested 30-second watchdog. On
 reported `healthy_no_restore_needed`, `ConnectivityRestored=true`, and made no
 restore attempt. The checked-in evidence contains no machine secrets.
 
-## Open questions before live use
+## Next research boundary
 
-1. Trace `0x1400d2a90` and `0x1400d1570` into firmware command construction and
-   determine whether either control changes channel or operating mode.
-2. Trace `N6PciProcessRxIcsPacket`, `MT7925ParserIcsRawData`, `ProcessIcsLog`, and
-   `PrintSnifferPcapLog` to identify the RX sink and file format.
-3. A stock-driver raw 802.11 transmit primitive that preserves association was not
-   found after auditing all 96 vendor OIDs and the WDI/IHV vocabulary. Further work
-   must move below this dispatch surface (miniport modification/replacement or a
-   firmware/PCIe path), not guess additional `MTKWLAN` controls.
-4. Only after those static safety questions are answered, use a minimal read-only
-   device-open/query probe. Any state-changing control remains watchdog-gated.
+The guarded query and ICS sink questions above are resolved. No caller-frame TX
+primitive was identified in the 96 vendor-OID handlers or the shipped IHV control
+callback. Continue at the installed WiFiCx client's TX/RX queues and native-frame
+builder, using legacy WDI as comparison evidence rather than assuming its callback
+ABI applies. The [Linux/Windows comparison](mt7925-linux-windows-datapath-map.md)
+and [build plan](mt7925-miniport-build-plan.md) define the remaining static gates.
+No additional live query is needed to reproduce this analysis.
 
 ## Reproduction tools
 
 The scripts beside this note use `pefile` and Capstone and never load a driver:
 
 - `pe_string_xrefs.py` finds RIP-relative ASCII/UTF-16 string references.
+- `pe_address_xrefs.py` finds memory-bounded RIP-relative/immediate references
+  to an exact PE virtual address and reports the containing runtime function.
 - `pe_callsite_scan.py` locates imported call sites and nearby constants/strings.
 - `pe_function_disasm.py` disassembles the PE runtime function containing a VA.
