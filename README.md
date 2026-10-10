@@ -2,6 +2,11 @@
 
 An open-source Windows app for sending files to and receiving files from iPhones and Macs through AirDrop.
 
+**Development status:** this is currently a research/tooling repository, not a
+working AirDrop app. There is no UI or runnable phone-to-PC transfer test yet.
+The latest [live recovery result and remaining TX gate](research/live-test-gate-20261010.md)
+distinguishes adapter recovery from an actual radio or AirDrop test.
+
 The project is licensed under GPL-3.0. The first implementation milestone is the mandatory [Wi-Fi safety gate](tools/wifi-safety/README.md): verified MT7925 backup/restore tooling and an independent 30-second connectivity watchdog. No radio experiment may bypass it.
 
 ## MT7925 research status
