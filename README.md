@@ -13,6 +13,7 @@ unproven. The next milestone is a same-channel prototype, with a hard approval
 gate before any live driver change.
 
 - [Linux/Windows evidence and datapath comparison](research/mt7925-linux-windows-datapath-map.md)
+- [Recovered WiFiCx queues and TX descriptor dispatch](research/mt7925-wificx-queue-map.md)
 - [Build plan, go/no-go gates, effort and risk](research/mt7925-miniport-build-plan.md)
 - [Private-control dispatch findings](research/mt7925-private-control.md)
 

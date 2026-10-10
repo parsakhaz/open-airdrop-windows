@@ -4,6 +4,8 @@ Start with the [build plan](mt7925-miniport-build-plan.md), then the
 [Linux/Windows comparison](mt7925-linux-windows-datapath-map.md) and
 [private-control audit](mt7925-private-control.md). These distinguish observed
 instructions, source-reported behavior, architectural hypotheses, and live gates.
+The [WiFiCx queue map](mt7925-wificx-queue-map.md) records the recovered callbacks,
+workers, separate packet/descriptor structures, and dynamic TXD dispatch.
 
 The PE tools read regular files. They do not load a driver, open a device, issue
 IOCTLs, or change adapter state. They require Python 3.10+, `pefile`, and
@@ -23,7 +25,8 @@ python research\pe_function_disasm.py 'C:\path\to\mtkwecx.sys' 0x1401d8540 --aro
 
 The verifier refuses any image whose SHA-256 differs from
 `6232dbfd53c2e9824eb4d193980f7db378b88dd155cb8d4e64ab56696e057161`.
-It checks function bounds, the recovered instruction sequence, and LEA/MOV pairs
+It checks function bounds, the descriptor and prepared-frame-control instructions,
+queue call edges, and LEA/MOV pairs
 that install the builder in two ops-table slots. Expected TXD2 low-six-bit values
 are `0x0d` for an action-frame header and `0x20` for a basic data-frame header.
 These are field-projection examples, not complete transmit descriptors.

@@ -21,27 +21,29 @@ Static inventory of the preserved `mtkwecx.sys` image exposes the following inte
 - receive path: `AsicConnac3xPciProcessRxPacket`, `AsicConnac3xPciProcessRxSnifferPacket`, and `N6PlatformIndicateRecvPktToNdis`;
 - completion/indication boundary: `N6PlatformIndicateXmitPktToNdis` and `N6PlatformIndicateRecvPktToNdis`.
 
-These names suggest the following layered path; arrows remain hypotheses until
-the queue map establishes each call. Static class-extension
+The [queue map](mt7925-wificx-queue-map.md) recovers the following path, with the
+remaining dynamic callback selection marked explicitly. Static class-extension
 strings and `WdfVersionBindClass` show that this package is a WiFiCx/NetAdapterCx
 client, not a legacy WDI miniport. It nevertheless retains `WdiSendDataProcess`,
 extensive `NdisWdi*`/WDI task vocabulary, and a native 802.11 internal path:
 
 ```text
-WiFiCx/WDI-style native 802.11 packet
-  -> WdiSendDataProcess
-  -> vendor classification / packet context
-  -> MT7925 TXD/TXWI construction
+WiFiCx/NetAdapterCx packet and fragment queues
+  -> EvtTxQueueAdvance -> worker -> processTxAdvance
+  -> MTCxHifPci*XmitHardTransmit
+  -> descriptor-input context populated from prepared 802.11 frame control
+  -> dynamic TXD dispatch through adapter+0x1464f17
+  -- unresolved chip-callback assignment --> Connac3 TXD/TXWI builder
   -> PCIe DMA ring + doorbell
   -> firmware/radio
 
-radio/firmware
-  -> PCIe RX ring
-  -> RXD/RXV parsing + policy/filtering
-  -> WiFiCx client native-MPDU/RX queue
-  -> 802.11 decapsulation/presentation
-  -> Windows NDIS/WDI indication
+RX producer / filtering (not fully mapped)
+  -> vendor per-port RX lists
+  -> EvtRxQueueAdvance -> NetAdapterCx rings
 ```
+
+`WdiSendDataProcess` has a separate worker family; shared scheduler code does not
+prove that WiFiCx calls that legacy processor.
 
 The comparison is exact at the TX descriptor. In installed `mtkwecx.sys`
 5.7.0.5115, `AsicConnac3xXmitWriteTxD` is the runtime function
@@ -53,8 +55,12 @@ with `0xffffffcf`, then inserts an input byte at `+0x2b` into bits 5:4. At
 `MT_TXD2_SUB_TYPE = GENMASK(3, 0)`. The Windows builder can therefore express
 internally selected management/action/data classification once its packet
 context is populated. This does not establish external caller control.
-The remaining static task is to trace the installed queue metadata
-into those two context bytes and identify WCID/encryption/sequence handling.
+Both WiFiCx hard-transmit helpers populate these descriptor-input offsets from
+the prepared frame-control word: type `(FC >> 2) & 3`, subtype `(FC >> 4) & 15`.
+That input is a separate stack object from the queue's TX bookkeeping object;
+identical numeric offsets in those two structures must not be conflated. Remaining
+tasks are to prove the chip callback selection, locate acceptable original frame
+input, and recover WCID/encryption/sequence handling.
 
 No caller-frame TX handler was identified in the 96 recovered vendor-OID records
 or shipped IHV DLL call sites for this image. Its diagnostic sniffer requires
@@ -145,7 +151,7 @@ The raw path must be inside the sole ring owner. It must never let user mode pro
 
 - Recover the exact WiFiCx/NetAdapterCx capability, TX/RX queue, and action-frame callback registrations in `mtkwecx.sys`; use older WDI handler layouts only as comparison evidence.
 - Name the installed equivalents of target-descriptor init, data send, injected-frame scheduling, native MPDU retrieval, RX indication, and buffer return.
-- Trace WiFiCx/WDI-style packet metadata through `WdiSendDataProcess` into the packet context bytes at `+0x2b/+0x2d`, then into TXD2.
+- Continue from the recovered WiFiCx hard-transmit helpers: trace the prepared header back to accepted input, and resolve the dynamic callback at `adapter+0x1464f17` to the MT7925 builder. Do not assume a `WdiSendDataProcess` edge.
 - Map WCID selection, injected/IHV TID handling, encryption exemption, sequence ownership, completion, and every failure cleanup.
 - Match the Windows sniffer/monitor firmware payload with Linux `UNI_SNIFFER_ENABLE`/`UNI_SNIFFER_CONFIG`; locate the active-port RX filter and native-MPDU queue.
 - Build golden offline vectors for one category-127 AWDL action MPDU and one unencrypted AWDL IPv6 data MPDU. No hardware I/O.

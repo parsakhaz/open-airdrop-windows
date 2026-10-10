@@ -98,7 +98,9 @@ def main() -> None:
                 continue
             text = printable_string(data, offset)
             if text:
-                annotations.append(repr(text))
+                # Windows redirected stdout can use cp1252.  A printable UTF-16
+                # candidate in a binary must not abort the disassembly output.
+                annotations.append(ascii(text))
         suffix = f" ; {' | '.join(annotations)}" if annotations else ""
         print(f"{instruction.address:#018x} {instruction.mnemonic:8} {instruction.op_str}{suffix}")
 

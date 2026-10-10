@@ -300,8 +300,11 @@ chip ID `0x7925` in its gates. Still unknown are:
 - how port, peer/WCID, own-MAC, sequence, encryption exemption, rate, and channel
   policy are selected for a management action frame.
 
-These are read-only reverse-engineering tasks. Until resolved, internal injection
-through this WiFiCx client is a research hypothesis, not a working entry point.
+The subsequent [WiFiCx queue map](mt7925-wificx-queue-map.md) resolves the current
+queue-to-hard-transmit-to-dynamic-TXD-dispatch path. It also traces the separate
+descriptor-input fields from the prepared frame-control word. The dynamic chip
+callback selection, original raw-input contract, and associated RX policy remain
+unresolved. Internal injection is still a research hypothesis, not a working entry.
 
 `verify_mt7925_txd.py` checks the exact image SHA-256, runtime-function bounds,
 instruction bytes, and both initializer-to-slot mappings. Its action/data vectors
@@ -412,9 +415,10 @@ a vendor-specific action category distinct from Public Action category 4.
 
 ### Go now: read-only and offline work
 
-1. **R0-TX call graph:** recover the per-chip object that owns ops-table slots
-   `0x14025cff8` and `0x14025d458`; trace the indirect edge from
-   `WdiSendDataProcess` to `AsicConnac3xXmitWriteTxD`.
+1. **R0-TX call graph:** tie the callback loaded from `adapter+0x1464f17` by
+   `0x1401a2b2c` to ops-table slots `0x14025cff8` or `0x14025d458` for MT7925.
+   The [queue map](mt7925-wificx-queue-map.md) recovers the preceding direct edges;
+   `WdiSendDataProcess` is a separate path, not an assumed intermediate step.
 2. **R0-TX inputs:** identify the object at `rdi`, name offsets `+0x2b/+0x2d`, and
    trace buffer pointer/length, port, WCID, own-MAC, rate, exemption, ACK, and
    sequence inputs.
