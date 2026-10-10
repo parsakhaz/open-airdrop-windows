@@ -208,6 +208,7 @@ $report = [ordered]@{
     StartedAtUtc = $startedAt.ToString('o')
     FinishedAtUtc = $null
     Mode = $null
+    RecoveryMode = $null
     OperationExitCode = $null
     OperationCancelled = $false
     WorkersStoppedBeforeRestore = $false
@@ -231,6 +232,8 @@ try {
     if ($config.Mode -notin @('drill', 'production')) { throw "Unknown watchdog mode '$($config.Mode)'." }
     if ($config.Mode -eq 'production') {
         if ([int] $config.TimeoutSeconds -ne 30) { throw 'Production watchdogs must use the fixed 30-second timeout.' }
+        if ($config.RecoveryMode -notin @('AdapterStateOnly', 'DriverPackage')) { throw 'Production recovery mode must be explicit: AdapterStateOnly or DriverPackage.' }
+        $report.RecoveryMode = [string] $config.RecoveryMode
         if (-not (Test-Path -LiteralPath $config.OperationScript -PathType Leaf)) { throw "Operation script is missing: $($config.OperationScript)" }
         if (-not (Test-Path -LiteralPath $config.ModulePath -PathType Leaf)) { throw "Safety module is missing: $($config.ModulePath)" }
         Initialize-WatchdogWorkerType
@@ -310,7 +313,7 @@ try {
         }
         else {
             Import-Module $config.ModulePath -Force
-            Restore-WifiSafetyBackup -BackupPath $config.BackupPath -AdapterName $config.AdapterName -Confirm:$false
+            Restore-WifiSafetyBackup -BackupPath $config.BackupPath -AdapterName $config.AdapterName -AdapterStateOnly:($report.RecoveryMode -eq 'AdapterStateOnly') -Confirm:$false
             $report.RestoreSucceeded = $true
         }
     }

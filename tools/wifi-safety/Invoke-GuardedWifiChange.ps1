@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)] [string] $AdapterName,
     [Parameter(Mandatory = $true)] [string] $BackupPath,
     [Parameter(Mandatory = $true)] [string] $OperationScript,
+    [ValidateSet('AdapterStateOnly', 'DriverPackage')] [string] $RecoveryMode = 'AdapterStateOnly',
     [string[]] $ConnectivityEndpoints = @('1.1.1.1:443', '8.8.8.8:53'),
     [switch] $IUnderstandThisMayInterruptWifi
 )
@@ -37,6 +38,7 @@ $config = [pscustomobject]@{
     SchemaVersion = 1
     Mode = 'production'
     TimeoutSeconds = 30
+    RecoveryMode = $RecoveryMode
     AdapterName = $AdapterName
     BackupPath = (Resolve-Path -LiteralPath $BackupPath).Path
     OperationScript = (Resolve-Path -LiteralPath $OperationScript).Path

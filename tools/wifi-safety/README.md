@@ -6,6 +6,18 @@ This package is mandatory before any experiment changes the built-in MediaTek MT
 - `Restore-Backup.ps1` verifies every hash, refuses a different PnP device, reinstalls the package, restores settings, and restarts the adapter.
 - `Invoke-GuardedWifiChange.ps1` starts an independent `SYSTEM` watchdog task on demand, without a future trigger that could repeat the operation. Operation scripts must accept an `-AdapterName` parameter.
 - `Invoke-ReversibleDrill.ps1` changes a temporary text file and proves that the watchdog restores it after the deadline.
+- `Invoke-LiveAdapterDrill.ps1` verifies the backup and restore-point presence,
+  then runs the disable drill with `AdapterStateOnly` recovery and records the
+  watchdog report plus before/after internet pings. It requires explicit live
+  authorization and elevation.
+
+The guarded runner now defaults to `-RecoveryMode AdapterStateOnly`: recovery
+only enables the same adapter with the same driver version and INF. It cannot
+reinstall a package, rewrite advanced settings, or explicitly restart the adapter.
+It is suitable for the disable drill, not recovery from arbitrary firmware state
+or a driver patch. Full package restoration requires explicit
+`-RecoveryMode DriverPackage` and separate authorization for driver installation.
+Production watchdog configurations must name a valid recovery mode.
 
 The production supervisor runs the operation and connectivity probes in separate
 Windows job objects. It starts workers suspended, assigns each to its job, then
@@ -18,10 +30,11 @@ recovered rollback, and `1` for failed recovery; inspect its full report.
 
 Never run a live change unless local recovery access exists, the backup verifies, the 30-second reversible drill passes, and a live adapter-disable drill passes. Every later driver or adapter operation must use the guarded runner.
 
-The current user instruction also requires fresh approval before any live driver
-load, modification, replacement, or adapter experiment. The tests in this research
-pass use temporary files and fake connectivity/recovery functions only; they do
-not renew approval or validate a new watchdog build on the physical adapter.
+Fresh approval is required before any live driver load, modification, replacement,
+or adapter experiment. Authorization to run an adapter-only drill is not permission
+to reinstall a driver. Offline tests use temporary files and fake recovery; they
+do not validate a new watchdog build on the physical adapter. Read the dated live
+evidence before relying on physical validation.
 
 The 30-second deadline is a trigger to stop the experiment and begin recovery,
 not a guarantee that connectivity is restored within 30 seconds. Recovery commands

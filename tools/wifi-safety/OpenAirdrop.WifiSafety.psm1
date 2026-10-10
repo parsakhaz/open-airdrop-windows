@@ -247,7 +247,8 @@ function Restore-WifiSafetyBackup {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory = $true)] [string] $BackupPath,
-        [Parameter(Mandatory = $true)] [string] $AdapterName
+        [Parameter(Mandatory = $true)] [string] $AdapterName,
+        [switch] $AdapterStateOnly
     )
 
     Assert-IsAdministrator
@@ -256,6 +257,17 @@ function Restore-WifiSafetyBackup {
     Assert-Mt7925Record -Record $currentRecord
     if ([string] $currentRecord.PnpDeviceId -ne [string] $manifest.Adapter.PnpDeviceId) {
         throw 'Refusing restore because the current adapter PnP identity differs from the backup.'
+    }
+
+    if ($AdapterStateOnly) {
+        if ($currentRecord.DriverVersion -ne $manifest.Adapter.DriverVersion -or
+            $currentRecord.InfName -ne $manifest.Adapter.InfName) {
+            throw 'Adapter-only recovery refuses a changed driver package. Recover locally; driver installation is not authorized by this mode.'
+        }
+        if ($PSCmdlet.ShouldProcess($currentRecord.FriendlyName, 'Enable the existing adapter without installing a driver or changing settings')) {
+            Enable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
+        }
+        return
     }
 
     if (-not $PSCmdlet.ShouldProcess($currentRecord.FriendlyName, 'Restore backed-up driver package and adapter settings')) {

@@ -69,7 +69,8 @@ function Test-InternetConnectivity {
 }
 function Restore-WifiSafetyBackup {
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param([string] $BackupPath, [string] $AdapterName)
+    param([string] $BackupPath, [string] $AdapterName, [switch] $AdapterStateOnly)
+    if (-not $AdapterStateOnly) { throw 'Offline regression expected explicit adapter-only recovery.' }
     foreach ($pidName in @('operation.pid', 'child.pid', 'probe.pid')) {
         $pidPath = Join-Path $BackupPath $pidName
         if (Test-Path -LiteralPath $pidPath) {
@@ -133,6 +134,7 @@ function New-OfflineWatchdogCase {
         SchemaVersion = 1
         Mode = 'production'
         TimeoutSeconds = $TimeoutSeconds
+        RecoveryMode = 'AdapterStateOnly'
         AdapterName = $caseDirectory
         BackupPath = $caseDirectory
         OperationScript = $fakeOperationPath
@@ -204,6 +206,7 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $contenderCase 'operation.pid'))) 'Mutex refusal must occur before operation starts'
     $hungResult = Complete-OfflineWatchdogCase -Process $hungProcess -CaseDirectory $hungCase
     Assert-True ($hungResult.ExitCode -eq 0) "Hung operation should restore successfully: $($hungResult.Report.Error)"
+    Assert-True ($hungResult.Report.RecoveryMode -eq 'AdapterStateOnly') 'Recovery mode must be explicit and recorded'
     Assert-True $hungResult.Report.OperationCancelled 'Hung operation must be cancelled'
     Assert-True $hungResult.Report.WorkersStoppedBeforeRestore 'All operation descendants must exit before restoration'
     Assert-True ($hungResult.Report.RecoveryReason -eq 'deadline_expired') 'Hung operation must trigger the actual deadline'
