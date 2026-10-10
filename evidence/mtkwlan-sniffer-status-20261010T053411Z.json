@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "timestampUtc": "2026-10-10T05:34:11.2632747Z",
+  "device": "\\\\.\\MTKWLAN",
+  "opened": true,
+  "operation": "query-sniffer-status",
+  "oid": "0xfffcf01c",
+  "ioctl": "0x00170002",
+  "queried": true,
+  "bytesReturned": 28,
+  "status": [0, 0, 0],
+  "win32Error": 0,
+  "error": null,
+  "watchdog": {
+    "startedAtUtc": "2026-10-10T05:34:10.7606927Z",
+    "finishedAtUtc": "2026-10-10T05:34:11.7250238Z",
+    "operationExitCode": 0,
+    "connectivityRestored": true,
+    "restoreAttempted": false,
+    "restoreSucceeded": false,
+    "outcome": "healthy_no_restore_needed"
+  }
+}

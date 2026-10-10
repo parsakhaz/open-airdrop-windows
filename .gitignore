@@ -1,0 +1,5 @@
+.venv-re/
+.re-sources/
+__pycache__/
+*.pyc
+tools/mt7925-control/bin/
