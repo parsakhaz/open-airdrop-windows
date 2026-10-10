@@ -1,0 +1,13 @@
+{
+    "SchemaVersion":  1,
+    "StartedAtUtc":  "2026-10-10T05:08:12.3684474Z",
+    "FinishedAtUtc":  "2026-10-10T05:09:10.0719647Z",
+    "Mode":  "production",
+    "OperationExitCode":  0,
+    "ConnectivityRestored":  true,
+    "RestoreAttempted":  true,
+    "RestoreSucceeded":  true,
+    "Outcome":  "restored_after_timeout",
+    "Error":  null
+}
+

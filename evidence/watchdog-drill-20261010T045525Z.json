@@ -1,0 +1,20 @@
+﻿{
+    "SchemaVersion":  1,
+    "DrillId":  "16bc154bb3a3421ab2b3ffa708e23bd1",
+    "HarmlessAction":  "Changed a temporary text file from \u0027healthy\u0027 to \u0027temporarily-broken\u0027.",
+    "TimeoutSeconds":  30,
+    "ElapsedSeconds":  31.366,
+    "FinalState":  "healthy",
+    "WatchdogReport":  {
+                           "SchemaVersion":  1,
+                           "StartedAtUtc":  "2026-10-10T04:54:54.2812085Z",
+                           "FinishedAtUtc":  "2026-10-10T04:55:24.6091912Z",
+                           "Mode":  "drill",
+                           "OperationExitCode":  0,
+                           "ConnectivityRestored":  true,
+                           "RestoreAttempted":  true,
+                           "RestoreSucceeded":  true,
+                           "Outcome":  "restored_after_timeout",
+                           "Error":  null
+                       }
+}
