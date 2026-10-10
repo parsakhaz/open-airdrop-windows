@@ -1,13 +1,13 @@
 # open-airdrop-windows
 
-**AirDrop for Windows.** Send to and receive files from iPhones and Macs, natively from Windows — including work to
+**AirDrop for Windows.** Send to and receive files from iPhones and Macs, natively from Windows, including work to
 enable it on the built-in Wi-Fi card safely, with automatic restore if anything disrupts your connection.
 
-> **Bonus:** this is part of a single "Apple interop" app that also does **[AirPlay on Windows](https://github.com/parsakhaz/open-airplay)** — receive AirPlay from your devices and mirror your screen to an Apple TV.
+> **Bonus:** this is part of a single "Apple interop" app that also does **[AirPlay on Windows](https://github.com/parsakhaz/open-airplay)**, receive AirPlay from your devices and mirror your screen to an Apple TV.
 
 Open source (GPL-3.0). Windows first.
 
-Status: the AirPlay side of the app is **working**. AirDrop on the **built-in** Wi-Fi card is **research, currently parked** — see [What's next](#whats-next) for exactly how far it got and the working path forward.
+Status: the AirPlay side of the app is **working**. AirDrop on the **built-in** Wi-Fi card is **research, currently parked**, see [What's next](#whats-next) for exactly how far it got and the working path forward.
 
 ## Credits & acknowledgments
 
@@ -68,23 +68,23 @@ media. None of this touches the AirDrop code.
 
 ## What's next
 
-AirDrop needs a Wi-Fi radio that can do 802.11 **monitor mode + frame injection while staying connected** — that's what Apple Wireless Direct Link (AWDL) requires. Here's the honest state and the paths forward.
+AirDrop needs a Wi-Fi radio that can do 802.11 **monitor mode + frame injection while staying connected**, that's what Apple Wireless Direct Link (AWDL) requires. Here's the honest state and the paths forward.
 
 **What works today**
-- [x] A tested **Wi-Fi safety net** — driver/state backup plus an independent watchdog that auto-restores your connection if a radio experiment disrupts it. Proven on real hardware (it recovered after a deliberate adapter drop).
+- [x] A tested **Wi-Fi safety net**, driver/state backup plus an independent watchdog that auto-restores your connection if a radio experiment disrupts it. Proven on real hardware (it recovered after a deliberate adapter drop).
 
-**Built-in MediaTek MT7925 (native Windows) — parked**
+**Built-in MediaTek MT7925 (native Windows), parked**
 This is the "no dongle *and* no reboot" dream, and it's the genuinely unsolved part. Progress so far (static analysis only, no frame sent yet):
 - [x] Mapped the Windows driver's transmit path end-to-end (`WiFiCx` → the MT7925 Connac3 frame-descriptor builder) and confirmed the Linux and Windows drivers map frames into the same hardware descriptor bits.
 - [x] Confirmed the private sniffer (monitor RX) path exists in the signed driver.
-- [ ] **Caller-controlled raw TX** — actually injecting an AWDL frame from user space. *Not achieved.*
-- [ ] **Associated monitor RX** — capturing while connected. *Not achieved.*
+- [ ] **Caller-controlled raw TX**, actually injecting an AWDL frame from user space. *Not achieved.*
+- [ ] **Associated monitor RX**, capturing while connected. *Not achieved.*
 - [ ] Fallback if the stock driver blocks us: a replacement/filter miniport (larger effort).
 
-Why this is slow: on Linux the `mt7925e` driver *exposes* monitor + injection, so [omdrop-owl](https://github.com/t4t5/omdrop-owl) just uses it. The Windows driver hides it, so this is a reverse-engineering project — there is no doubletake-style head start for the radio.
+Why this is slow: on Linux the `mt7925e` driver *exposes* monitor + injection, so [omdrop-owl](https://github.com/t4t5/omdrop-owl) just uses it. The Windows driver hides it, so this is a reverse-engineering project, there is no doubletake-style head start for the radio.
 
 **The fast path that actually works (no reboot)**
-- [ ] A **cheap USB Wi-Fi dongle (~$20)** passed into **WSL2** (`usbipd`), running the Linux `mt76` driver + OWL + omdrop — the omdrop-owl approach, hosted on Windows. Days, not weeks. (WSL2 can't reach the built-in PCIe card, only USB devices — which is exactly why the built-in route is hard.)
+- [ ] A **cheap USB Wi-Fi dongle (~$20)** passed into **WSL2** (`usbipd`), running the Linux `mt76` driver + OWL + omdrop, the omdrop-owl approach, hosted on Windows. Days, not weeks. (WSL2 can't reach the built-in PCIe card, only USB devices, which is exactly why the built-in route is hard.)
 
 **Then**
 - [ ] Fold a working AirDrop send/receive flow into the shared app UI, alongside AirPlay.
