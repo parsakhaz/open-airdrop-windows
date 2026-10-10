@@ -38,8 +38,14 @@ buffer is the vendor payload.
 | `0xfffcf017` | `0x14001abf0` | `FuncSar`; SAR-sized output |
 
 The DLL also issues `0x220408`, `0x22040c`, `0x220410`, `0x220414`, `0x220448`, and
-`0x22045c` through a separate helper-device path. Current evidence does not connect
-those controls to `MTKWLAN`.
+`0x22045c` through a separate helper-device path. That path is now resolved: it
+enumerates the standard USB hub interface `{f18a0e88-c30c-11d0-8815-00a0c906bed8}`
+and USB device interface `{a5dcbf10-6530-11d2-901f-00c04fb951ed}`, opens USB
+interface paths, and queries descriptor/topology data. It does not address this
+PCIe MT7925. The remaining DLL control `0x410050` is sent to a handle returned by
+`BluetoothFindFirstRadio`, after requesting `SeLoadDriverPrivilege`; it belongs to
+the Bluetooth radio path rather than `MTKWLAN`. Consequently, every observed DLL
+IOCTL outside `0x170002` is unrelated to the PCIe Wi-Fi private control device.
 
 ## Kernel device, ACL, and dispatch
 
@@ -119,6 +125,48 @@ Private OIDs `0xfffcf209` and `0xfffcf208` map to `FuncSetTestMode` and
 `FuncGetTestMode`. They toggle/query a driver test flag; they do not accept a frame
 buffer. Test mode is therefore not an association-preserving raw-TX API.
 
+## Exhaustive vendor-OID audit
+
+`pe_oid_inventory.py` recovers 96 valid 12-byte dispatch records and associates
+each handler with RIP-relative log-name strings. The complete table was audited,
+including all 19 handlers without a recovered `Func*` name.
+
+The only TX/capture/test-labelled entries are:
+
+| OID | Handler purpose |
+|---|---|
+| `0xfffcf00a` | TX statistics |
+| `0xfffcf018` | TX-hang counter |
+| `0xfffcf01c` | idle-only packet sniffer |
+| `0xfffcf104` | PHY/ICS logging |
+| `0xfffcf208` / `0xfffcf209` | get/set test-mode flag |
+
+Potentially broad-looking entries were also ruled out:
+
+- `0xfffcf01f` (`FuncTRx_Setting`) selects RX spatial streams, forced
+  single-ended behavior, and spatial-index controls; its four-byte payload is not
+  a transmit frame.
+- `0xfffcf108` (`FuncSetReg`) is a large selector-driven register/debug handler.
+  Its branches perform fixed register operations; there is no caller-sized frame
+  submission.
+- unnamed `0xfffcf109` is a 56-byte string-keyed configuration getter/setter for
+  values such as `TxopLimit`, `AMSDURx`, and PHY policy settings.
+- unnamed `0xfffcf003` and `0xfffcf004` use fixed-size 0x1d0-byte and four-byte
+  buffers with fixed firmware command IDs `0x7c` and `0xc5`. Neither accepts a
+  variable packet buffer.
+- CSI, beamforming, fixed-rate, radio, P2P/GO-channel, MLO, statistics, efuse, SAR,
+  and country handlers are configuration or telemetry only.
+
+The WDI strings `WDI_TASK_IHV`, `WDI_IHV_REQUEST`, and `WDI_TLV_IHV_DATA` occur in
+generic numeric-ID-to-name diagnostic functions shared by the driver framework.
+No corresponding packet-oriented IHV handler is registered, and `mtkihvx.dll`
+does not import or invoke a WLAN IHV-control API. Its Wi-Fi operations reduce to
+the four observed `MTKWLAN` OID queries.
+
+Together, the exhaustive dispatch audit closes the remaining stock-driver
+userspace escape hatch: there is no private OID that accepts an arbitrary 802.11
+TX buffer, and the only 802.11 RX sniffer enforces idle ports.
+
 ## Guarded live validation
 
 The read-only probe in `tools/mt7925-control` opened `\\.\MTKWLAN` and issued the
@@ -133,9 +181,10 @@ restore attempt. The checked-in evidence contains no machine secrets.
    determine whether either control changes channel or operating mode.
 2. Trace `N6PciProcessRxIcsPacket`, `MT7925ParserIcsRawData`, `ProcessIcsLog`, and
    `PrintSnifferPcapLog` to identify the RX sink and file format.
-3. Find a stock-driver raw 802.11 transmit primitive that preserves association.
-   WDI action-frame operations are not arbitrary raw TX, and no such primitive has
-   been proved yet.
+3. A stock-driver raw 802.11 transmit primitive that preserves association was not
+   found after auditing all 96 vendor OIDs and the WDI/IHV vocabulary. Further work
+   must move below this dispatch surface (miniport modification/replacement or a
+   firmware/PCIe path), not guess additional `MTKWLAN` controls.
 4. Only after those static safety questions are answered, use a minimal read-only
    device-open/query probe. Any state-changing control remains watchdog-gated.
 

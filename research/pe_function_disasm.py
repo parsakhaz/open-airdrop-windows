@@ -44,6 +44,11 @@ def main() -> None:
         help="Print only instructions around this virtual address",
     )
     parser.add_argument("--context", type=int, default=18)
+    parser.add_argument(
+        "--length",
+        type=lambda value: int(value, 0),
+        help="Disassemble this many bytes when the address has no runtime-function entry",
+    )
     args = parser.parse_args()
     data = args.pe.read_bytes()
     pe = pefile.PE(data=data, fast_load=False)
@@ -57,8 +62,11 @@ def main() -> None:
         None,
     )
     if not containing:
-        raise SystemExit("Address is not covered by a PE runtime function")
-    start, end = containing
+        if args.length is None:
+            raise SystemExit("Address is not covered by a PE runtime function (pass --length for raw code)")
+        start, end = args.address, args.address + args.length
+    else:
+        start, end = containing
     code = pe.get_data(start - base, end - start)
     imports = {}
     for descriptor in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
