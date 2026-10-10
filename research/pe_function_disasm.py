@@ -33,6 +33,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("pe", type=Path)
     parser.add_argument("address", type=lambda value: int(value, 0))
+    parser.add_argument(
+        "--calls-only",
+        action="store_true",
+        help="Print only call instructions (useful for very large functions)",
+    )
+    parser.add_argument(
+        "--around",
+        type=lambda value: int(value, 0),
+        help="Print only instructions around this virtual address",
+    )
+    parser.add_argument("--context", type=int, default=18)
     args = parser.parse_args()
     data = args.pe.read_bytes()
     pe = pefile.PE(data=data, fast_load=False)
@@ -58,8 +69,14 @@ def main() -> None:
 
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     md.detail = True
+    instructions = list(md.disasm(code, start))
+    if args.around is not None:
+        center = min(range(len(instructions)), key=lambda i: abs(instructions[i].address - args.around))
+        instructions = instructions[max(0, center - args.context) : center + args.context + 1]
     print(f"function {start:#x}-{end:#x} ({end-start} bytes)")
-    for instruction in md.disasm(code, start):
+    for instruction in instructions:
+        if args.calls_only and instruction.mnemonic != "call":
+            continue
         annotations = []
         for operand in instruction.operands:
             if operand.type != X86_OP_MEM or operand.mem.base != X86_REG_RIP:

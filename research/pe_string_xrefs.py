@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import pefile
@@ -16,20 +17,35 @@ def main() -> None:
     parser.add_argument("pe", type=Path)
     parser.add_argument("needle")
     parser.add_argument("--context", type=int, default=20)
+    parser.add_argument(
+        "--substring",
+        action="store_true",
+        help="Match within printable strings and resolve references to their starts",
+    )
     args = parser.parse_args()
 
     data = args.pe.read_bytes()
     pe = pefile.PE(data=data, fast_load=False)
     base = pe.OPTIONAL_HEADER.ImageBase
     offsets = set()
-    for encoded in (args.needle.encode("ascii") + b"\0", args.needle.encode("utf-16le") + b"\0\0"):
-        start = 0
-        while True:
-            found = data.find(encoded, start)
-            if found < 0:
-                break
-            offsets.add(found)
-            start = found + 1
+    if args.substring:
+        needle = args.needle.casefold()
+        for match in re.finditer(rb"[ -~]{4,}\x00", data):
+            if needle in match.group()[:-1].decode("ascii").casefold():
+                offsets.add(match.start())
+        wide_pattern = re.compile(rb"(?:[ -~]\x00){4,}\x00\x00")
+        for match in wide_pattern.finditer(data):
+            if needle in match.group()[:-2].decode("utf-16le").casefold():
+                offsets.add(match.start())
+    else:
+        for encoded in (args.needle.encode("ascii") + b"\0", args.needle.encode("utf-16le") + b"\0\0"):
+            start = 0
+            while True:
+                found = data.find(encoded, start)
+                if found < 0:
+                    break
+                offsets.add(found)
+                start = found + 1
     if not offsets:
         raise SystemExit("String not found")
 

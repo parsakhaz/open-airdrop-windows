@@ -103,6 +103,30 @@ This proves a reachable private capture-control ABI. It does **not** yet prove w
 captured frames are delivered, whether monitor RX coexists with an associated
 station, or whether ICS data is exposed anywhere except the driver's PCAP/log path.
 
+Further disassembly resolves two important constraints:
+
+- `FuncSniffer` calls `IsAllPortIdle` (`0x140027524`) before enable. It rejects the
+  request if any of the driver's five ports is active, so this packet-sniffer path
+  cannot preserve a normal associated station.
+- The ICS path is separate. Firmware command `0x93` accepts the 0x54-byte command,
+  and `nicExtEventPhyIcsRawData` writes timestamped files named
+  `\DriverData\MediaTek\ICS\IcsLog_<time>.bin`. Records contain magic
+  `0x44d9c99a`, type `0x000d`, a word-count-derived size, and byte-swapped raw PHY
+  words. This is proprietary RF/ICS diagnostic data, not a monitor-mode 802.11
+  packet stream or PCAP.
+
+Private OIDs `0xfffcf209` and `0xfffcf208` map to `FuncSetTestMode` and
+`FuncGetTestMode`. They toggle/query a driver test flag; they do not accept a frame
+buffer. Test mode is therefore not an association-preserving raw-TX API.
+
+## Guarded live validation
+
+The read-only probe in `tools/mt7925-control` opened `\\.\MTKWLAN` and issued the
+opcode-2 sniffer status query under the tested 30-second watchdog. On
+2026-10-10T05:34:11Z it returned 28 bytes and status `[0, 0, 0]`. The watchdog
+reported `healthy_no_restore_needed`, `ConnectivityRestored=true`, and made no
+restore attempt. The checked-in evidence contains no machine secrets.
+
 ## Open questions before live use
 
 1. Trace `0x1400d2a90` and `0x1400d1570` into firmware command construction and
